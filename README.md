@@ -50,9 +50,11 @@ Keep the terminal window open while it downloads models.
 
 This project **will never download executable (.exe) files automatically**.
 
-`sd.exe` is the Windows binary for **stable-diffusion.cpp** (the inference backend). You download it yourself so you can choose which release/build you trust.
+`sd.exe` (or `sd-cli.exe`) is the Windows binary for **stable-diffusion.cpp** (the inference backend). You download it yourself so you can choose which release/build you trust.
 
-## Where to get `sd.exe` (Windows)
+**Note:** Recent releases use `sd-cli.exe` instead of `sd.exe`. The installer and UI will automatically detect which one you have.
+
+## Where to get the executable (Windows)
 
 Download a Windows build from the **stable-diffusion.cpp Releases** page.
 
@@ -61,17 +63,21 @@ Recommended assets (names include a commit/hash):
 - NVIDIA (recommended): `sd-...-bin-win-cuda12-x64.zip`
 - CPU only: `sd-...-bin-win-x64.zip`
 
+Inside the ZIP, you'll find the executable. Recent releases use `sd-cli.exe` (recommended), while older releases use `sd.exe`. Either will work with this project.
+
 Install steps:
 
 1. Extract the ZIP.
-2. Copy `sd.exe` to:
-   - `sd_bin\sd.exe`
+2. Copy the executable to one of:
+   - `sd_bin\sd-cli.exe` (recommended)
+   - `sd_bin\sd.exe` (legacy)
 3. Copy any `*.dll` files from the ZIP into the same folder:
    - `sd_bin\`
 
 Important:
 
 - Some releases provide DLLs as a separate asset. If your ZIP contains only `sd.exe`, download the matching DLL package for the same release and copy all DLLs next to `sd.exe`.
+- **If upgrading from an older release**: Make sure to also update the DLL files. Use the DLLs that came with your downloaded executable (e.g., `stable-diffusion.dll`). Mixing old DLLs with a new executable (or vice versa) will cause errors.
 
 ## What the installer downloads (and what is manual)
 
@@ -97,9 +103,10 @@ Manual download sources:
 
 ## Troubleshooting
 
-If generation fails or `sd.exe` crashes:
+If generation fails or the executable crashes:
 
-- Make sure you copied all DLLs next to `sd.exe`.
+- Make sure you copied **all DLLs** that came with your executable. Use the DLLs from the same ZIP/release as your executable.
+- **Important**: If you upgraded from an older release, make sure to also update the DLL files. Mixing old DLLs with a new executable will cause errors.
 - Install Microsoft Visual C++ Redistributable 2015-2022 (x64).
 - If the CUDA build fails, try the CPU build to confirm everything else works.
 - Common crash code:

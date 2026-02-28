@@ -4,10 +4,27 @@ from pathlib import Path
 import gradio as gr
 
 ROOT = Path(__file__).parent
-SD_EXE = str(ROOT / "sd_bin" / "sd.exe")
+SD_BIN_DIR = ROOT / "sd_bin"
+SD_EXE = str(SD_BIN_DIR / "sd-cli.exe")
 MODEL_PATH = str(ROOT / "models" / "zimage" / "z_image_turbo_Q4_0.gguf")
 OUTDIR = str(ROOT / "outputs")
 os.makedirs(OUTDIR, exist_ok=True)
+
+
+def find_sd_executable():
+    """Auto-detect available stable-diffusion executable."""
+    candidates = [
+        ("sd-cli.exe", "sd-cli.exe (recommended)"),
+        ("sd.exe", "sd.exe (legacy)"),
+    ]
+    for exe_name, label in candidates:
+        exe_path = SD_BIN_DIR / exe_name
+        if exe_path.exists():
+            return str(exe_path), label
+    return None, None
+
+
+SD_EXE, SD_EXE_LABEL = find_sd_executable()
 
 DEFAULT_VAE_PATH = str(ROOT / "models" / "vae" / "ae.safetensors")
 DEFAULT_LLM_PATH = str(ROOT / "models" / "llm" / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
@@ -40,10 +57,17 @@ def apply_preset(preset_label):
     return gr.update(), gr.update()
 
 def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path):
+    if SD_EXE is None:
+        available = list(SD_BIN_DIR.glob("*.exe")) if SD_BIN_DIR.exists() else []
+        if available:
+            exe_list = ", ".join([f.name for f in available])
+            return None, f"No supported executable found in sd_bin/. Found: {exe_list}\n\nExpected: sd-cli.exe or sd.exe\n\nDownload from: https://github.com/leejet/stable-diffusion.cpp/releases"
+        return None, f"sd_bin folder not found. Create folder: {SD_BIN_DIR}"
+
     uid = uuid.uuid4().hex[:8]
     out_file = os.path.join(OUTDIR, f"out_{uid}.png")
     if not os.path.isfile(SD_EXE):
-        return None, f"sd.exe not found: {SD_EXE}"
+        return None, f"Executable not found: {SD_EXE}"
     if not os.path.isfile(MODEL_PATH):
         return None, f"Model not found: {MODEL_PATH}"
     vae_path = (vae_path or "").strip() or DEFAULT_VAE_PATH

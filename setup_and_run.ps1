@@ -164,25 +164,38 @@ Write-Host "Upgrading pip..."
 Write-Host 'Installing Python requirements (gradio, requests)...'
 & $venvPython -m pip install gradio requests tqdm
 
-# 7. Check for sd binary
-$sdexe = Join-Path $sdBin "sd.exe"
-if (!(Test-Path $sdexe)) {
+# 7. Check for sd binary (sd-cli.exe or sd.exe)
+$sdCliExe = Join-Path $sdBin "sd-cli.exe"
+$sdOldExe = Join-Path $sdBin "sd.exe"
+
+if ((Test-Path $sdCliExe)) {
+    Write-Host "Found sd-cli.exe (recommended)"
+    $sdexe = $sdCliExe
+} elseif ((Test-Path $sdOldExe)) {
+    Write-Host "Found sd.exe (legacy)"
+    $sdexe = $sdOldExe
+} else {
     Write-Host ""
-    Write-Host "IMPORTANT: A stable-diffusion.cpp Windows binary (sd.exe) is REQUIRED to run the model."
-    Write-Host "Please download a prebuilt Windows binary from the official stable-diffusion.cpp releases (or compile it) and place the file named 'sd.exe' into the folder:"
+    Write-Host "IMPORTANT: A stable-diffusion.cpp Windows binary is REQUIRED to run the model."
+    Write-Host "Please download from the official stable-diffusion.cpp releases:"
+    Write-Host "    https://github.com/leejet/stable-diffusion.cpp/releases"
+    Write-Host ""
+    Write-Host "Recommended: Extract 'sd-cli.exe' (or 'sd.exe' from older releases) to:"
     Write-Host "    $sdBin"
     Write-Host ""
-    Write-Host "Press Enter after you have placed sd.exe, or Ctrl+C to exit."
+    Write-Host "Note: Recent releases use 'sd-cli.exe'. Older releases use 'sd.exe'. Either will work."
+    Write-Host ""
+    Write-Host "Press Enter after you have placed the executable, or Ctrl+C to exit."
     Read-Host
 }
 
 if (!(Test-Path $sdexe)) {
-    Write-Host "sd.exe still not found in $sdBin. Exiting."
+    Write-Host "Executable still not found in $sdBin. Exiting."
     exit 1
 }
 
-# 7b. Sanity-check sd.exe (common crash is missing DLL / wrong build)
-Write-Host "`nChecking sd.exe..."
+# 7b. Sanity-check executable (common crash is missing DLL / wrong build)
+Write-Host "`nChecking executable..."
 try {
     & $sdexe --help | Out-Null
 } catch {
@@ -190,11 +203,11 @@ try {
 }
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "ERROR: sd.exe failed to start (exit code: $LASTEXITCODE)."
-    Write-Host "This usually means a missing dependency or wrong sd.exe build." 
+    Write-Host "ERROR: Executable failed to start (exit code: $LASTEXITCODE)."
+    Write-Host "This usually means a missing dependency or wrong build." 
     Write-Host "" 
     Write-Host "Please check:" 
-    Write-Host " 1) You extracted the release ZIP and copied sd.exe AND any .dll files next to it into:"
+    Write-Host " 1) You extracted the release ZIP and copied the executable AND any .dll files into:"
     Write-Host "    $sdBin"
     Write-Host " 2) Microsoft Visual C++ Redistributable 2015-2022 (x64) is installed"
     Write-Host " 3) If you downloaded a CUDA build, your NVIDIA driver supports that CUDA version"
@@ -284,10 +297,27 @@ from pathlib import Path
 import gradio as gr
 
 ROOT = Path(__file__).parent
-SD_EXE = str(ROOT / "sd_bin" / "sd.exe")
+SD_BIN_DIR = ROOT / "sd_bin"
+SD_EXE = str(SD_BIN_DIR / "sd-cli.exe")
 MODEL_PATH = str(ROOT / "models" / "zimage" / "__MODEL_NAME__")
 OUTDIR = str(ROOT / "outputs")
 os.makedirs(OUTDIR, exist_ok=True)
+
+
+def find_sd_executable():
+    """Auto-detect available stable-diffusion executable."""
+    candidates = [
+        ("sd-cli.exe", "sd-cli.exe (recommended)"),
+        ("sd.exe", "sd.exe (legacy)"),
+    ]
+    for exe_name, label in candidates:
+        exe_path = SD_BIN_DIR / exe_name
+        if exe_path.exists():
+            return str(exe_path), label
+    return None, None
+
+
+SD_EXE, SD_EXE_LABEL = find_sd_executable()
 
 DEFAULT_VAE_PATH = str(ROOT / "models" / "vae" / "ae.safetensors")
 DEFAULT_LLM_PATH = str(ROOT / "models" / "llm" / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
@@ -320,10 +350,17 @@ def apply_preset(preset_label):
     return gr.update(), gr.update()
 
 def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path):
+    if SD_EXE is None:
+        available = list(SD_BIN_DIR.glob("*.exe")) if SD_BIN_DIR.exists() else []
+        if available:
+            exe_list = ", ".join([f.name for f in available])
+            return None, f"No supported executable found in sd_bin/. Found: {exe_list}\n\nExpected: sd-cli.exe or sd.exe\n\nDownload from: https://github.com/leejet/stable-diffusion.cpp/releases"
+        return None, f"sd_bin folder not found. Create folder: {SD_BIN_DIR}"
+
     uid = uuid.uuid4().hex[:8]
     out_file = os.path.join(OUTDIR, f"out_{uid}.png")
     if not os.path.isfile(SD_EXE):
-        return None, f"sd.exe not found: {SD_EXE}"
+        return None, f"Executable not found: {SD_EXE}"
     if not os.path.isfile(MODEL_PATH):
         return None, f"Model not found: {MODEL_PATH}"
     vae_path = (vae_path or "").strip() or DEFAULT_VAE_PATH
