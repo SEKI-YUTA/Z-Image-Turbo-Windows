@@ -370,6 +370,11 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     if not os.path.isfile(llm_path):
         return None, f"LLM (text encoder) not found: {llm_path}"
 
+    # sd-cli.exe uses seed < 0 for random; UI sends 0 for random
+    actual_seed = int(seed)
+    if actual_seed == 0:
+        actual_seed = -1
+
     # Use a list of arguments to avoid Windows shell quoting issues.
     # shell=True + embedded quotes can cause sd-cli.exe to silently ignore
     # flags like -o (output path) and -H/-W (dimensions).
@@ -384,7 +389,7 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
         "-H", str(int(height)),
         "-W", str(int(width)),
         "-o", out_file,
-        "--seed", str(int(seed)),
+        "--seed", str(actual_seed),
     ]
     print("Running:", " ".join(cmd))
     t0 = time.perf_counter()
