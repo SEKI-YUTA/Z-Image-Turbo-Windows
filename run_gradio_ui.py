@@ -1,5 +1,6 @@
-import os, subprocess, shlex, uuid, time
+import os, subprocess, shlex, uuid, time, json
 import re
+from datetime import datetime
 from pathlib import Path
 import gradio as gr
 
@@ -9,6 +10,48 @@ SD_EXE = str(SD_BIN_DIR / "sd-cli.exe")
 MODEL_PATH = str(ROOT / "models" / "zimage" / "z_image_turbo_Q4_0.gguf")
 OUTDIR = str(ROOT / "outputs")
 os.makedirs(OUTDIR, exist_ok=True)
+GENERATION_LOG_PATH = os.path.join(OUTDIR, "generation_log.json")
+
+
+def load_generation_log():
+    """Load existing generation log or return empty list."""
+    if os.path.isfile(GENERATION_LOG_PATH):
+        try:
+            with open(GENERATION_LOG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return []
+    return []
+
+
+def save_generation_metadata(image_path, prompt, width, height, steps, seed_requested,
+                             seed_actual, cfg_scale, vae_path, llm_path,
+                             model_path, elapsed_seconds, sd_exe_used):
+    """Append generation metadata to the JSON log file."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "image_path": image_path,
+        "image_filename": os.path.basename(image_path),
+        "prompt": prompt,
+        "width": int(width),
+        "height": int(height),
+        "steps": int(steps),
+        "seed_requested": int(seed_requested),
+        "seed_actual": seed_actual,
+        "cfg_scale": float(cfg_scale),
+        "vae_path": vae_path,
+        "llm_path": llm_path,
+        "model_path": model_path,
+        "sd_executable": sd_exe_used,
+        "elapsed_seconds": round(elapsed_seconds, 2),
+    }
+    log = load_generation_log()
+    log.append(entry)
+    try:
+        with open(GENERATION_LOG_PATH, "w", encoding="utf-8") as f:
+            json.dump(log, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        print(f"Warning: Failed to save generation log: {e}")
 
 
 def find_sd_executable():
@@ -78,7 +121,8 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
         return None, f"LLM (text encoder) not found: {llm_path}"
 
     # sd-cli.exe uses seed < 0 for random; UI sends 0 for random
-    actual_seed = int(seed)
+    seed_requested = int(seed)
+    actual_seed = seed_requested
     if actual_seed == 0:
         actual_seed = -1
 
@@ -105,6 +149,8 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     elapsed = t1 - t0
     print(proc.stdout)
     reported = []
+    # Try to extract the actual seed used from sd-cli.exe output
+    resolved_seed = actual_seed
     if proc.stdout:
         m = re.search(r"generate_image completed in\s+([0-9.]+)s", proc.stdout)
         if m:
@@ -115,6 +161,10 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
         m = re.search(r"loading tensors completed, taking\s+([0-9.]+)s", proc.stdout)
         if m:
             reported.append(f"sd.exe model load: {m.group(1)}s")
+        # Extract actual seed when random was requested
+        seed_match = re.search(r"seed:\s*(\d+)", proc.stdout)
+        if seed_match:
+            resolved_seed = int(seed_match.group(1))
 
     timing_line = f"Wall-clock time: {elapsed:.2f}s"
     if reported:
@@ -123,12 +173,34 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     combined_log = (timing_line + "\n\n" + (proc.stdout.strip() if proc.stdout else "")).strip()
     if proc.returncode != 0:
         return None, f"sd.exe exited with code {proc.returncode}\n\n{combined_log}".strip()
-    # Check both the expected output file and the outputs directory
+
+    # Find the generated image
+    result_path = None
     if os.path.isfile(out_file):
-        return out_file, combined_log if combined_log else "Done"
-    imgs = sorted(Path(OUTDIR).glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if imgs:
-        return str(imgs[0]), combined_log if combined_log else "Done"
+        result_path = out_file
+    else:
+        imgs = sorted(Path(OUTDIR).glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if imgs:
+            result_path = str(imgs[0])
+
+    if result_path:
+        # Save generation metadata to log
+        save_generation_metadata(
+            image_path=result_path,
+            prompt=str(prompt),
+            width=int(width),
+            height=int(height),
+            steps=int(steps),
+            seed_requested=seed_requested,
+            seed_actual=resolved_seed,
+            cfg_scale=float(cfg_scale),
+            vae_path=vae_path,
+            llm_path=llm_path,
+            model_path=MODEL_PATH,
+            elapsed_seconds=elapsed,
+            sd_exe_used=SD_EXE,
+        )
+        return result_path, combined_log if combined_log else "Done"
     else:
         return None, (combined_log if combined_log else "No image was produced. Check sd.exe output above.")
 
