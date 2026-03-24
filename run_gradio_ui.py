@@ -123,6 +123,9 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     combined_log = (timing_line + "\n\n" + (proc.stdout.strip() if proc.stdout else "")).strip()
     if proc.returncode != 0:
         return None, f"sd.exe exited with code {proc.returncode}\n\n{combined_log}".strip()
+    # Check both the expected output file and the outputs directory
+    if os.path.isfile(out_file):
+        return out_file, combined_log if combined_log else "Done"
     imgs = sorted(Path(OUTDIR).glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
     if imgs:
         return str(imgs[0]), combined_log if combined_log else "Done"
