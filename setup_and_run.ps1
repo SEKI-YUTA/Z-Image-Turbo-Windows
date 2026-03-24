@@ -370,21 +370,30 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     if not os.path.isfile(llm_path):
         return None, f"LLM (text encoder) not found: {llm_path}"
 
-    cmd = (
-        f'"{SD_EXE}" '
-        f'--diffusion-model "{MODEL_PATH}" '
-        f'--vae "{vae_path}" '
-        f'--llm "{llm_path}" '
-        f'-p "{prompt}" '
-        f'--cfg-scale {cfg_scale} '
-        f'--steps {steps} '
-        f'-H {height} -W {width} '
-        f'-o "{out_file}" '
-        f'--seed {seed}'
-    )
-    print("Running:", cmd)
+    # sd-cli.exe uses seed < 0 for random; UI sends 0 for random
+    actual_seed = int(seed)
+    if actual_seed == 0:
+        actual_seed = -1
+
+    # Use a list of arguments to avoid Windows shell quoting issues.
+    # shell=True + embedded quotes can cause sd-cli.exe to silently ignore
+    # flags like -o (output path) and -H/-W (dimensions).
+    cmd = [
+        SD_EXE,
+        "--diffusion-model", MODEL_PATH,
+        "--vae", vae_path,
+        "--llm", llm_path,
+        "-p", str(prompt),
+        "--cfg-scale", str(cfg_scale),
+        "--steps", str(int(steps)),
+        "-H", str(int(height)),
+        "-W", str(int(width)),
+        "-o", out_file,
+        "--seed", str(actual_seed),
+    ]
+    print("Running:", " ".join(cmd))
     t0 = time.perf_counter()
-    proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(ROOT))
     t1 = time.perf_counter()
     elapsed = t1 - t0
     print(proc.stdout)
@@ -407,6 +416,9 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
     combined_log = (timing_line + "\n\n" + (proc.stdout.strip() if proc.stdout else "")).strip()
     if proc.returncode != 0:
         return None, f"sd.exe exited with code {proc.returncode}\n\n{combined_log}".strip()
+    # Check both the expected output file and the outputs directory
+    if os.path.isfile(out_file):
+        return out_file, combined_log if combined_log else "Done"
     imgs = sorted(Path(OUTDIR).glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
     if imgs:
         return str(imgs[0]), combined_log if combined_log else "Done"
