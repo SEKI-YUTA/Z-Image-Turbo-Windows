@@ -3,6 +3,10 @@
 ## Running the Application
 * **One-Click Start**: `start_zimage.bat` (Executes `setup_and_run.ps1` under the hood)
 * **Direct UI Run** (if venv is activated): `python run_gradio_ui.py`
+* **API Generation Request** (when app is running):
+  ```bash
+  curl -X POST http://127.0.0.1:9000/api/generate -H "Content-Type: application/json" -d "{\"prompt\": \"A prompt\", \"output_path\": \"C:\\\\output.png\"}"
+  ```
 
 ## Running Inference Backend Directly
 You can bypass the UI and directly run the backend:
