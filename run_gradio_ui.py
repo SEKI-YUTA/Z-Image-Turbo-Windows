@@ -3,11 +3,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 import gradio as gr
+from fastapi import FastAPI
+from pydantic import BaseModel
+import uvicorn
 
 ROOT = Path(__file__).parent
 SD_BIN_DIR = ROOT / "sd_bin"
 SD_EXE = str(SD_BIN_DIR / "sd-cli.exe")
-MODEL_PATH = str(ROOT / "models" / "zimage" / "z_image_turbo_Q4_0.gguf")
+MODEL_PATH = str(ROOT / "models" / "zimage" / "z_image_turbo_Q8_0.gguf")
 OUTDIR = str(ROOT / "outputs")
 os.makedirs(OUTDIR, exist_ok=True)
 GENERATION_LOG_PATH = os.path.join(OUTDIR, "generation_log.json")
@@ -99,7 +102,7 @@ def apply_preset(preset_label):
             return w, h
     return gr.update(), gr.update()
 
-def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path):
+def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path, output_path=None):
     if SD_EXE is None:
         available = list(SD_BIN_DIR.glob("*.exe")) if SD_BIN_DIR.exists() else []
         if available:
@@ -108,7 +111,10 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
         return None, f"sd_bin folder not found. Create folder: {SD_BIN_DIR}"
 
     uid = uuid.uuid4().hex[:8]
-    out_file = os.path.join(OUTDIR, f"out_{uid}.png")
+    if output_path and str(output_path).strip():
+        out_file = str(output_path).strip()
+    else:
+        out_file = os.path.join(OUTDIR, f"out_{uid}.png")
     if not os.path.isfile(SD_EXE):
         return None, f"Executable not found: {SD_EXE}"
     if not os.path.isfile(MODEL_PATH):
@@ -226,11 +232,13 @@ with gr.Blocks() as demo:
             with gr.Row():
                 vae_path = gr.Textbox(label="VAE path", value=DEFAULT_VAE_PATH, interactive=False)
                 llm_path = gr.Textbox(label="LLM (Qwen) path", value=DEFAULT_LLM_PATH, interactive=False)
+            with gr.Row():
+                output_path = gr.Textbox(label="Output Path (Optional)", value="", placeholder="e.g. C:\\my_folder\\image.png", interactive=False)
 
             def set_unlocked(enabled):
-                return gr.update(interactive=bool(enabled)), gr.update(interactive=bool(enabled))
+                return gr.update(interactive=bool(enabled)), gr.update(interactive=bool(enabled)), gr.update(interactive=bool(enabled))
 
-            unlock.change(set_unlocked, inputs=[unlock], outputs=[vae_path, llm_path])
+            unlock.change(set_unlocked, inputs=[unlock], outputs=[vae_path, llm_path, output_path])
 
     preset.change(apply_preset, inputs=[preset], outputs=[width, height])
 
@@ -239,19 +247,53 @@ with gr.Blocks() as demo:
     img = gr.Image(label="Result")
     status = gr.Textbox(label="Status", interactive=False, lines=12)
 
-    def run_and_return(p, w, h, st, sd, cfg, vae, llm):
+    def run_and_return(p, w, h, st, sd, cfg, vae, llm, out_path):
         global FIRST_RUN
         if FIRST_RUN:
             FIRST_RUN = False
             yield None, "Generating... (first run can take longer due to model loading)", gr.update(interactive=False)
         else:
             yield None, "Generating...", gr.update(interactive=False)
-        out, log = gen_image(p, int(w), int(h), int(st), int(sd), float(cfg), vae, llm)
+        out, log = gen_image(p, int(w), int(h), int(st), int(sd), float(cfg), vae, llm, out_path)
         if out:
             yield out, log if log else "Done", gr.update(interactive=True)
             return
         yield None, log if log else "Failed", gr.update(interactive=True)
 
-    btn.click(run_and_return, inputs=[prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path], outputs=[img, status, btn])
+    btn.click(run_and_return, inputs=[prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path, output_path], outputs=[img, status, btn])
 
-demo.launch(server_name="127.0.0.1", server_port=9000, share=False)
+app = FastAPI()
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    width: int = 512
+    height: int = 512
+    steps: int = 8
+    seed: int = 0
+    cfg_scale: float = 1.0
+    vae_path: str = ""
+    llm_path: str = ""
+    output_path: str = None
+
+@app.post("/api/generate")
+def api_generate(req: GenerateRequest):
+    out, log = gen_image(
+        prompt=req.prompt,
+        width=req.width,
+        height=req.height,
+        steps=req.steps,
+        seed=req.seed,
+        cfg_scale=req.cfg_scale,
+        vae_path=req.vae_path,
+        llm_path=req.llm_path,
+        output_path=req.output_path
+    )
+    if out:
+        return {"status": "success", "image_path": out, "log": log}
+    else:
+        return {"status": "error", "message": log}
+
+app = gr.mount_gradio_app(app, demo, path="/")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=9000)
