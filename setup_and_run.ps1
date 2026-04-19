@@ -498,6 +498,23 @@ def gen_image(prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path)
         return None, (combined_log if combined_log else "No image was produced. Check sd.exe output above.")
 
 with gr.Blocks() as demo:
+    # Add browser state
+    state = gr.BrowserState(
+        {
+            "prompt": "A large orange octopus on an ocean floor, cinematic, 8k",
+            "preset": "1:1 (512x512)",
+            "width": 512,
+            "height": 512,
+            "steps": 8,
+            "cfg_scale": 1.0,
+            "seed": 0,
+            "unlock": False,
+            "vae_path": DEFAULT_VAE_PATH,
+            "llm_path": DEFAULT_LLM_PATH,
+        },
+        storage_key="zimage_state_v1"
+    )
+
     gr.Markdown("# Z-Image Turbo - Minimal UI")
     with gr.Tabs():
         with gr.Tab("Basic"):
@@ -525,7 +542,7 @@ with gr.Blocks() as demo:
 
             unlock.change(set_unlocked, inputs=[unlock], outputs=[vae_path, llm_path])
 
-    preset.change(apply_preset, inputs=[preset], outputs=[width, height])
+    preset.select(apply_preset, inputs=[preset], outputs=[width, height])
 
     with gr.Row():
         btn = gr.Button("Generate")
@@ -546,6 +563,41 @@ with gr.Blocks() as demo:
         yield None, log if log else "Failed", gr.update(interactive=True)
 
     btn.click(run_and_return, inputs=[prompt, width, height, steps, seed, cfg_scale, vae_path, llm_path], outputs=[img, status, btn])
+
+    # State management
+    def load_state(s):
+        return (
+            s.get("prompt", "A large orange octopus on an ocean floor, cinematic, 8k"),
+            s.get("preset", "1:1 (512x512)"),
+            s.get("width", 512),
+            s.get("height", 512),
+            s.get("steps", 8),
+            s.get("cfg_scale", 1.0),
+            s.get("seed", 0),
+            s.get("unlock", False),
+            s.get("vae_path", DEFAULT_VAE_PATH),
+            s.get("llm_path", DEFAULT_LLM_PATH)
+        )
+
+    def save_state(p, pr, w, h, st, cfg, sd, unlk, vae, llm):
+        return {
+            "prompt": p,
+            "preset": pr,
+            "width": w,
+            "height": h,
+            "steps": st,
+            "cfg_scale": cfg,
+            "seed": sd,
+            "unlock": unlk,
+            "vae_path": vae,
+            "llm_path": llm
+        }
+
+    state_inputs = [prompt, preset, width, height, steps, cfg_scale, seed, unlock, vae_path, llm_path]
+    demo.load(load_state, inputs=[state], outputs=state_inputs)
+    
+    for comp in state_inputs:
+        comp.change(save_state, inputs=state_inputs, outputs=[state])
 
 demo.launch(server_name="127.0.0.1", server_port=9000, share=False)
 '@
